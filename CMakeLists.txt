@@ -5,21 +5,44 @@
 # Updated by jesnault (jerome.esnault@inria.fr) 2014-01-21
 # -----------------------------------------------------------------
 
+option(HUNTER_ENABLED "Enable Hunter package manager support" OFF)
+include("cmake/HunterGate.cmake")
+HunterGate(
+  URL "https://github.com/ruslo/hunter/archive/v0.23.34.tar.gz"
+  SHA1 "70287b1ffa810ee4e952052a9adff9b4856d0d54"
+)
+
 PROJECT(SuiteSparseProject)
 
-cmake_minimum_required(VERSION 2.8.10)
+cmake_minimum_required(VERSION 3.1)
+
+# https://cmake.org/cmake/help/latest/prop_tgt/CXX_STANDARD.html
+string(COMPARE EQUAL "${CMAKE_CXX_STANDARD}" "" no_cmake_cxx_standard_set)
+if(no_cmake_cxx_standard_set)
+  set(CMAKE_CXX_STANDARD 11)
+  set(CMAKE_CXX_STANDARD_REQUIRED ON)
+  set(CMAKE_CXX_EXTENSIONS OFF)
+  message(STATUS "Using default C++ standard ${CMAKE_CXX_STANDARD}")
+else()
+  message(STATUS "Using user specified C++ standard ${CMAKE_CXX_STANDARD}")
+endif()
 
 include(checkGetSuiteSparse.cmake)
+
+if(BUILD_SHARED_LIBS)
+	set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif(BUILD_SHARED_LIBS)
+
 
 SET(LIBRARY_OUTPUT_PATH ${${PROJECT_NAME}_BINARY_DIR}/lib CACHE PATH "Output directory for libraries" )
 SET(EXECUTABLE_OUTPUT_PATH ${${PROJECT_NAME}_BINARY_DIR}/bin CACHE PATH "Output directory for applications" )
 
 # Override "CMAKE_INSTALL_PREFIX", on Windows if not set:
-IF(WIN32 AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+if(WIN32 AND (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OR (NOT CMAKE_INSTALL_PREFIX STREQUAL SUITESPARSE_INSTALL_PREFIX)))
 	SET(SUITESPARSE_INSTALL_PREFIX "${${PROJECT_NAME}_BINARY_DIR}/install" CACHE PATH "Prefix prepended to install directories")
 	SET(CMAKE_INSTALL_PREFIX "${SUITESPARSE_INSTALL_PREFIX}" CACHE INTERNAL "Prefix prepended to install directories" FORCE)
 	message(STATUS "Setting CMAKE_INSTALL_PREFIX to: ${CMAKE_INSTALL_PREFIX}")
-ENDIF()
+endif()
 
 # Fix GKlib path:
 IF(NOT WIN32)
@@ -191,12 +214,25 @@ if(WITH_CUDA)
 	ENDIF(${CUDA_FOUND})
 endif()
 
-find_package(BLAS)
-find_package(LAPACK)
-if (LAPACK_FOUND AND BLAS_FOUND)
-	message(STATUS "found lapack and blas config file. Linking targets lapack and blas")
-	set(SuiteSparse_LINKER_LAPACK_BLAS_LIBS ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES})
-else () # LAPACK is not found
+if (HUNTER_ENABLED)
+  hunter_add_package(LAPACK)
+  find_package(LAPACK CONFIG REQUIRED)
+  if (NOT TARGET lapack)
+    message(STATUS "found LAPACK config but missing link target 'lapack'")
+  endif()
+  if (NOT TARGET blas)
+    message(STATUS "found LAPACK config but missing link target 'blas'")
+  endif()
+  message(STATUS "found lapack and blas config file. Linking targets lapack and blas")
+  set(SuiteSparse_LINKER_LAPACK_BLAS_LIBS lapack blas)
+else() # Hunter not enabled
+
+  find_package(BLAS)
+  find_package(LAPACK)
+  if (BLAS_FOUND AND LAPACK_FOUND)
+    message(STATUS "found lapack and blas config file. Linking targets lapack and blas")
+    set(SuiteSparse_LINKER_LAPACK_BLAS_LIBS ${LAPACK_LIBRARIES} ${BLAS_LIBRARIES})
+  else () # LAPACK is not found
 
 ## Need to use SuiteSparse_LINKER_LAPACK_BLAS_LIBS in our subproject in case of SHARED flag is set to ON
 SET(SUITESPARSE_USE_CUSTOM_BLAS_LAPACK_LIBS OFF CACHE BOOL "Check if you have custom LAPACK/BLAS libraries (AMD,...)")
@@ -241,6 +277,7 @@ ELSE()
 	ENDIF()
 ENDIF()
 ENDIF() # LAPACK found
+endif() # HUNTER_ENABLED
 
 if(SuiteSparse_LAPACK_BLAS_LIB_DIR) # "Export" the imported targets in config.cmake manually
 	set(ExternConfig "add_library(blas SHARED IMPORTED)
